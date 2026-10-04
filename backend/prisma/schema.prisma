@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+model User {
+  id            String       @id @default(cuid())
+  name          String
+  email         String       @unique
+  password      String
+  xp            Int          @default(0)
+  coins         Int          @default(0)
+  streak        Int          @default(0)
+  lastActiveAt  DateTime?
+  createdAt     DateTime     @default(now())
+  quests        Quest[]
+  journalEntries JournalEntry[]
+  dsaProblems   DsaProblem[]
+  projects      Project[]
+  rewards       Reward[]
+  redemptions   Redemption[]
+}
+
+model Quest {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    String
+  xpReward    Int
+  coinReward  Int
+  completed   Boolean  @default(false)
+  completedAt DateTime?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  date        DateTime
+  learned     String
+  built       String?
+  problem     String?
+  solution    String?
+  stillNeed   String?
+  confidence  Int      @default(3)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, date])
+}
+
+model DsaProblem {
+  id          String   @id @default(cuid())
+  title       String
+  topic       String
+  difficulty  String
+  solved      Boolean  @default(false)
+  solvedAt    DateTime?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  progress    Int      @default(0)
+  status      String   @default("Building")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Reward {
+  id          String       @id @default(cuid())
+  name        String
+  cost        Int
+  emoji       String       @default("🎁")
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redemptions Redemption[]
+}
+
+model Redemption {
+  id        String   @id @default(cuid())
+  rewardId  String
+  userId    String
+  createdAt DateTime @default(now())
+  reward    Reward   @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

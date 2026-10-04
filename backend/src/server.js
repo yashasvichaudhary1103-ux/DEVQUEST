@@ -1,0 +1,28 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+process.on('SIGINT', async () => { await prisma.$disconnect(); process.exit(0); });
+process.on('SIGTERM', async () => { await prisma.$disconnect(); process.exit(0); });
+const app = express();
+const allowedOrigins = new Set(['http://localhost:5174','http://127.0.0.1:5174','file://']);
+app.use(cors({ origin: (origin, callback) => { if (!origin || allowedOrigins.has(origin) || origin.startsWith('file://')) return callback(null, true); callback(new Error('Origin not allowed')); } }));
+app.use(express.json());
+const PORT = process.env.PORT || 5001;
+function tokenFor(user){ return jwt.sign({id:user.id}, process.env.JWT_SECRET, {expiresIn:'7d'}); }
+async function auth(req,res,next){ try { const h=req.headers.authorization||''; const t=h.startsWith('Bearer ')?h.slice(7):null; if(!t) return res.status(401).json({message:'Authentication required'}); req.user=jwt.verify(t,process.env.JWT_SECRET); next(); } catch(e){ return res.status(401).json({message:'Invalid or expired token'}); } }
+function safeUser(u){ return {id:u.id,name:u.name,email:u.email,xp:u.xp,coins:u.coins,streak:u.streak,lastActiveAt:u.lastActiveAt}; }
+function level(xp){ return Math.floor(xp/200)+1; }
+app.get('/api/health',(req,res)=>res.json({ok:true,app:'Full-Stack Journey'}));
+app.post('/api/auth/register',async(req,res)=>{ try { const {name,email,password}=req.body; if(!name||!email||!password) return res.status(400).json({message:'Name, email and password are required'}); const exists=await prisma.user.findUnique({where:{email}}); if(exists) return res.status(409).json({message:'Email already registered'}); const user=await prisma.user.create({data:{name,email,password:await bcrypt.hash(password,10)}}); res.json({token:tokenFor(user),user:safeUser(user)}); } catch(e){res.status(500).json({message:'Registration failed'});} });
+app.post('/api/auth/login',async(req,res)=>{ try { const {email,password}=req.body; const user=await prisma.user.findUnique({where:{email}}); if(!user||!(await bcrypt.compare(password,user.password))) return res.status(401).json({message:'Invalid email or password'}); res.json({token:tokenFor(user),user:safeUser(user)}); } catch(e){res.status(500).json({message:'Login failed'});} });
+app.get('/api/dashboard',auth,async(req,res)=>{ const user=await prisma.user.findUnique({where:{id:req.user.id},include:{quests:{orderBy:{createdAt:'desc'}},dsaProblems:true,projects:true,rewards:true,journalEntries:{orderBy:{date:'desc'},take:10}}}); res.json({user:safeUser(user),level:level(user.xp),quests:user.quests,dsa:user.dsaProblems,projects:user.projects,rewards:user.rewards,journals:user.journalEntries,internshipTarget:'2027-04-30'}); });
+app.post('/api/quests/:id/complete',auth,async(req,res)=>{ const q=await prisma.quest.findFirst({where:{id:req.params.id,userId:req.user.id}}); if(!q) return res.status(404).json({message:'Quest not found'}); if(q.completed) return res.json({quest:q,message:'Already completed'}); const user=await prisma.user.findUnique({where:{id:req.user.id}}); const updated=await prisma.$transaction([prisma.quest.update({where:{id:q.id},data:{completed:true,completedAt:new Date()}}),prisma.user.update({where:{id:user.id},data:{xp:{increment:q.xpReward},coins:{increment:q.coinReward},streak:{increment:user.lastActiveAt&&new Date(user.lastActiveAt).toDateString()===new Date().toDateString()?0:1},lastActiveAt:new Date()}})]); res.json({quest:updated[0],user:safeUser(updated[1]),level:level(updated[1].xp)}); });
+app.post('/api/journal',auth,async(req,res)=>{ const {date,learned,built,problem,solution,stillNeed,confidence}=req.body; if(!learned?.trim()) return res.status(400).json({message:'Tell us what you learned today.'}); const d=new Date(date||new Date()); d.setHours(0,0,0,0); const entry=await prisma.journalEntry.upsert({where:{userId_date:{userId:req.user.id,date:d}},update:{learned,built,problem,solution,stillNeed,confidence:Number(confidence)||3},create:{userId:req.user.id,date:d,learned,built,problem,solution,stillNeed,confidence:Number(confidence)||3}}); res.json(entry); });
+app.get('/api/journal',auth,async(req,res)=>res.json(await prisma.journalEntry.findMany({where:{userId:req.user.id},orderBy:{date:'desc'}})));
+app.patch('/api/dsa/:id',auth,async(req,res)=>{ const item=await prisma.dsaProblem.findFirst({where:{id:req.params.id,userId:req.user.id}}); if(!item)return res.status(404).json({message:'Problem not found'}); const solved=!item.solved; const updated=await prisma.dsaProblem.update({where:{id:item.id},data:{solved,solvedAt:solved?new Date():null}}); if(solved && !item.solved) await prisma.user.update({where:{id:req.user.id},data:{xp:{increment:30},coins:{increment:15}}}); res.json(updated); });
+app.post('/api/rewards/:id/redeem',auth,async(req,res)=>{ const reward=await prisma.reward.findFirst({where:{id:req.params.id,userId:req.user.id}}); const user=await prisma.user.findUnique({where:{id:req.user.id}}); if(!reward)return res.status(404).json({message:'Reward not found'}); if(user.coins<reward.cost)return res.status(400).json({message:'Not enough coins yet.'}); await prisma.$transaction([prisma.user.update({where:{id:user.id},data:{coins:{decrement:reward.cost}}}),prisma.redemption.create({data:{rewardId:reward.id,userId:user.id}})]); res.json({message:`${reward.name} redeemed!`,coins:user.coins-reward.cost}); });
+app.listen(PORT,'0.0.0.0',()=>console.log(`Full-Stack Journey API running on http://localhost:${PORT}`));

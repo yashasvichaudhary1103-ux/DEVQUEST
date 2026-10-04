@@ -1,0 +1,10 @@
+DEVQUEST Windows setup
+
+1. Extract this ZIP directly to E:\devquest (or another folder).
+2. Open PowerShell in that folder.
+3. Run: .\Setup-DevQuest.cmd
+4. After setup: .\Start-DevQuest-Desktop.cmd
+
+Requirements: Node.js, npm, Docker Desktop with the engine running.
+DEVQUEST PostgreSQL uses port 5433 so ProHours can continue using 5432.
+Demo: demo@journey.app / Journey@12345
